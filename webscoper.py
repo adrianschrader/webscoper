@@ -8,12 +8,29 @@ from numpy.lib.format import open_memmap
 from scipy import misc
 from StringIO import StringIO
 
+# Global variables (There is no reason for them to exist, but
+# converting them to parameters or cmd arguments is work)
+tilewidth = 250
+directory = './tiles'
+
 # Parameter action: Clean the kept jpeg files from disk
 class CleanDir(argparse.Action):
         nargs = 0
         def __call__(self, parser, namespace, values, option_string=None):
             if (os.path.exists(directory)):
+                print('Removing tile image directory...')
                 shutil.rmtree(directory)
+            rootpath = os.path.abspath('.')
+            dirlist = os.listdir(rootpath)
+
+            for item in dirlist:
+                if item.endswith('.jpg') or item.endswith('.npy') or item.endswith('.bmp') or item.endswith('.png'):
+                    path = os.path.join(rootpath, item)
+                    print('Removing ' + path)
+                    os.remove(path)
+
+            print('Success!')
+            parser.exit()
 
 # Create and configure parser
 parser = argparse.ArgumentParser()
@@ -21,21 +38,15 @@ parser.add_argument('title', metavar='title', type=str, help='title of the pictu
 parser.add_argument('url', metavar='url', type=str, help='url to download from')
 parser.add_argument('-wh', '--width', metavar='width', type=int, default=1000, help='width of the selected image segment')
 parser.add_argument('-ht', '--height', metavar='height', type=int, default=1000, help='height of the selected image segment')
-parser.add_argument('-xoff', '--xoffset', metavar='xoff', type=int, default=0, help='horizontal offset')
-parser.add_argument('-yoff', '--yoffset', metavar='yoff', type=int, default=0, help='vertical offset')
-parser.add_argument('-mag', '--magnification', metavar='magnification', type=float, default=40, help='Magnification (only 40,20,10,5,2.5,1). Saves network bandwidth. ')
+parser.add_argument('-xoff', '--xoffset', metavar='xoff', type=int, default=0, help='horizontal image offset')
+parser.add_argument('-yoff', '--yoffset', metavar='yoff', type=int, default=0, help='vertical image offset')
+parser.add_argument('-mag', '--magnification', metavar='magnification', type=float, default=40, help='Magnification (between 0.5 and 40). Saves network bandwidth. ')
 parser.add_argument('-q', '--quality', metavar='quality', type=int, default=80, help='JPEG Quality. Select 100 for best, 80 for default. ')
-parser.add_argument('-f', '--format', metavar='format', type=str, default='jpg', help='Desired format for the resulting image e.g. jpg, tiff, png')
-parser.add_argument('--keep', action='store_true', help='Keep the jpg images, not just mmap files')
+parser.add_argument('-f', '--format', metavar='format', type=str, default='jpg', help='Desired format for the resulting image e.g. jpg, bmp, png')
+parser.add_argument('--keep', action='store_true', help='Keep the jpg images, not just npy file')
 parser.add_argument('--recycle', action='store_true', help='Do not download things you have already downloaded, recycle images instead.')
-parser.add_argument('--clean', action=CleanDir, nargs=0, help='Delete the directory created by --keep. Caution!')
-
-# Global variables (There is no reason for them to exist, but
-# converting them to parameters or cmd arguments is work)
+parser.add_argument('-c', '--clean', action=CleanDir, nargs=0, help='CAUTION! Deletes ALL image files, including results and tiles images created with --keep')
 args = parser.parse_args()
-serverurl = args.url
-tilewidth = 250
-directory = './tiles'
 
 # Create a directory if it does not already exists
 def ensureDir():
@@ -118,10 +129,10 @@ def downloadTiles(name, result, xstart, ystart, xtiles, ytiles, xskip, yskip, zo
                 del img
 
                 # Announce progress. yeah!
-                print(' + (' + str(y + ytiles * x + 1) + '/' + str(total) + ') complete')
+                print(' + (' + str(y + ytiles * x + 1) + '/' + str(xtiles * ytiles) + ') complete')
             else:
                 # Announce laziness. yeah!
-                print(' - (' + str(y + ytiles * x + 1) + '/' + str(total) + ') skipped')
+                print(' - (' + str(y + ytiles * x + 1) + '/' + str(xtiles * ytiles) + ') skipped')
 
     # Announe success
     print('Download complete...')
@@ -129,7 +140,7 @@ def downloadTiles(name, result, xstart, ystart, xtiles, ytiles, xskip, yskip, zo
 
 def download(name, xstart, ystart, width, height, mag = 40, quality = 80, fileext = 'jpg'):
     # Initialize and normalize variables
-    zoom = getMag(mag)
+    zoom = getZoom(mag)
     xtiles = int(math.ceil(width / zoom / tilewidth))
     ytiles = int(math.ceil(height / zoom / tilewidth))
     total = xtiles * ytiles
@@ -156,5 +167,6 @@ def download(name, xstart, ystart, width, height, mag = 40, quality = 80, fileex
     # Clear memory and flush all data to disk for next run
     del result
 
-# Download the desired image in small steps. See help for help. 
+# Download the desired image in small steps. See help for help.
+serverurl = args.url
 download(args.title, args.xoffset, args.yoffset, args.width, args.height, args.magnification, args.quality, args.format);
