@@ -4,6 +4,7 @@ import requests
 import argparse
 import shutil
 import numpy as np
+from numpy.lib.format import open_memmap
 from scipy import misc
 from StringIO import StringIO
 
@@ -47,31 +48,49 @@ def getFilename(name, x, y):
 
 def downloadImage(filename, url):
     response = requests.get(url)
-    img = np.memmap(filename + 'mmap', dtype='uint8', mode='w+', shape=(tilewidth,tilewidth, 3));
-    img[:] = misc.imread(StringIO(response.content))[:];
-
     if args.keep:
-        with open(filename + 'jpg', 'wb') as code:
+        with open(filename + args.format, 'wb') as code:
             code.write(response.content)
 
-    return img;
+    return misc.imread(StringIO(response.content));
+
+def mergeDimensions(shape1, shape2):
+    return (shape1[0] if shape1[0] < shape2[0] else shape2[0], shape1[1] if shape1[1] < shape2[1] else shape2[1], 3)
+
+def recycleResult(name, xtiles, ytiles, zoom):
+    os.rename(name + '.npy', name + '.npy.old');
+    old_result = np.load(name + '.npy.old', mmap_mode='r')
+
+    result = open_memmap(name + '.npy', dtype='uint8', mode='w+', shape=(ytiles * tilewidth, xtiles * tilewidth, 3))
+    copy_dim = mergeDimensions(old_result.shape, result.shape)
+    result[0:copy_dim[0], 0:copy_dim[1]] = old_result[0:copy_dim[0], 0:copy_dim[1]]
+    print 'result', result.shape
+    print 'dopy', copy_dim
+
+    del old_result
+    os.remove(name + '.npy.old')
+    return (result, int(math.ceil(copy_dim[1] / tilewidth)), int(math.ceil(copy_dim[0] / tilewidth)))
 
 def downloadGrid(name, xstart, ystart, width, height, mag = 40, quality = 80, fileext = 'jpg'):
-    if (mag < 0.2 | mag > 40):
+    if mag < 0.2 or mag > 40:
         print('Default magnification: 1x. See help page for details. ')
         mag = 1
     else:
         print('Magnification: ' + str(mag) + 'x');
     zoom = int(40 / mag)
 
-    xtiles = int(math.ceil(width / zoom / tilewidth)) + 1
-    ytiles = int(math.ceil(height / zoom / tilewidth)) + 1
-    result = np.memmap('result.mmap', dtype='uint8', mode='w+', shape=(ytiles * tilewidth, xtiles * tilewidth, 3));
+    xtiles = int(math.ceil(width / zoom / tilewidth))
+    ytiles = int(math.ceil(height / zoom / tilewidth))
+    xskip = 0
+    yskip = 0
 
-    print('Downloading '+str(xtiles*ytiles)+' grid tiles')
+    if args.recycle and os.path.exists(name + '.npy'):
+        result, xskip, yskip = recycleResult(name, xtiles, ytiles, zoom)
+    else:
+        result = open_memmap(name + '.npy', dtype='uint8', mode='w+', shape=(ytiles * tilewidth, xtiles * tilewidth, 3))
+
+    print('Downloading ' + str(xtiles * ytiles) + ' grid tiles (skipping ' + str(xskip * yskip) + ')')
     print('from ' + serverurl + name + '.svs')
-
-    skipped = 0
     total = xtiles * ytiles
 
     for x in range(0, xtiles):
@@ -80,23 +99,17 @@ def downloadGrid(name, xstart, ystart, width, height, mag = 40, quality = 80, fi
         for y in range(0, ytiles):
             yoff = (ystart / zoom) + y * tilewidth
 
-            if (skipExisting(name, x, y)):
-                img = np.memmap(getFilename(name, x, y) + 'mmap', dtype='uint8', mode='r', shape=(tilewidth, tilewidth, 3))
-                result = concatenate(result, img, x, y)
-                del img
-
-                skipped += 1
-                print(' - (' + str(y + ytiles * x + 1) + '/' + str(total) + ') skipped')
-            else:
+            if x >= xskip or y >= yskip:
                 img = downloadImage(getFilename(name, x, y), getUrl(name, xoff, yoff, tilewidth, zoom, quality))
                 result = concatenate(result, img, x, y)
                 del img
+                print(' + (' + str(y + ytiles * x + 1) + '/' + str(total) + ') complete')
+            else:
+                print(' - (' + str(y + ytiles * x + 1) + '/' + str(total) + ') skipped')
 
-                print(' - (' + str(y + ytiles * x + 1) + '/' + str(total) + ') complete')
-
-    print('Download complete... (total: ' + str(total) + ', skipped: ' + str(skipped) + ', downloaded: ' + str(total - skipped) + ')')
-    print('Save mosaic image... (' + str(os.path.getsize('result.mmap') / 1000000) + 'MB)');
-    misc.imsave(name + '.' + fileext, result);
+    print('Download complete...')
+    print('Save mosaic image... (raw: ' + str(round(os.path.getsize(name + '.npy') / 1000000.0, 2)) + 'MB)');
+    misc.imsave(name + '.' + fileext, result)
     del result
 
 def skipExisting(name, x, y):
@@ -106,6 +119,6 @@ def concatenate(result, img, x, y):
     result[(y * tilewidth):((y + 1) * tilewidth), (x * tilewidth):((x + 1) * tilewidth), :] = img
     return result;
 
-
-ensureDir()
+if args.keep:
+    ensureDir()
 downloadGrid(args.title, args.xoffset, args.yoffset, args.width, args.height, args.magnification, args.quality, args.format);
