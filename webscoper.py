@@ -15,8 +15,6 @@ class CleanDir(argparse.Action):
         def __call__(self, parser, namespace, values, option_string=None):
             if (os.path.exists(directory)):
                 shutil.rmtree(directory)
-            if (os.path.exists('./result.mmap')):
-                os.remove('./result.mmap')
 
 parser = argparse.ArgumentParser()
 parser.add_argument('title', metavar='title', type=str, help='title of the picture')
@@ -25,8 +23,9 @@ parser.add_argument('-wh', '--width', metavar='width', type=int, default=1000, h
 parser.add_argument('-ht', '--height', metavar='height', type=int, default=1000, help='height of the selected image segment')
 parser.add_argument('-xoff', '--xoffset', metavar='xoff', type=int, default=0, help='horizontal offset')
 parser.add_argument('-yoff', '--yoffset', metavar='yoff', type=int, default=0, help='vertical offset')
-parser.add_argument('-mag', '--magnification', metavar='magnification', type=float, default=40, help='Magnification. Saves network bandwidth. ')
+parser.add_argument('-mag', '--magnification', metavar='magnification', type=float, default=40, help='Magnification (only 40,20,10,5,2.5,1). Saves network bandwidth. ')
 parser.add_argument('-q', '--quality', metavar='quality', type=int, default=80, help='JPEG Quality. Select 100 for best, 80 for default. ')
+parser.add_argument('-f', '--format', metavar='format', type=str, default='jpg', help='Desired format for the resulting image e.g. jpg, tiff, png')
 parser.add_argument('--keep', action='store_true', help='Keep the jpg images, not just mmap files')
 parser.add_argument('--recycle', action='store_true', help='Do not download things you have already downloaded, recycle images instead.')
 parser.add_argument('--clean', action=CleanDir, nargs=0)
@@ -38,10 +37,6 @@ def ensureDir():
     if not os.path.exists(directory):
         print('Creating temporary directory...')
         os.makedirs(directory)
-
-def purgeTiles():
-    if not args.keep:
-        print('!')
 
 def getUrl(name, xoff = 0, yoff = 0, width = 500, zoom = 1, quality = 80):
     options = '+'.join([ str(x) for x in [ xoff, yoff, width, width, zoom, quality ] ])
@@ -61,11 +56,10 @@ def downloadImage(filename, url):
 
     return img;
 
-
-def downloadGrid(name, xstart, ystart, width, height, mag = 40, quality = 80):
-    if (mag not in [40, 20, 10, 5, 2.5, 1]):
-        print('Default magnification: 5x. See help page for details. ')
-        mag = 5
+def downloadGrid(name, xstart, ystart, width, height, mag = 40, quality = 80, fileext = 'jpg'):
+    if (mag < 0.2 | mag > 40):
+        print('Default magnification: 1x. See help page for details. ')
+        mag = 1
     else:
         print('Magnification: ' + str(mag) + 'x');
     zoom = int(40 / mag)
@@ -75,7 +69,7 @@ def downloadGrid(name, xstart, ystart, width, height, mag = 40, quality = 80):
     result = np.memmap('result.mmap', dtype='uint8', mode='w+', shape=(ytiles * tilewidth, xtiles * tilewidth, 3));
 
     print('Downloading '+str(xtiles*ytiles)+' grid tiles')
-    print('from ' + serverurl + name + '.svs/view.ampl')
+    print('from ' + serverurl + name + '.svs')
 
     skipped = 0
     total = xtiles * ytiles
@@ -89,17 +83,21 @@ def downloadGrid(name, xstart, ystart, width, height, mag = 40, quality = 80):
             if (skipExisting(name, x, y)):
                 img = np.memmap(getFilename(name, x, y) + 'mmap', dtype='uint8', mode='r', shape=(tilewidth, tilewidth, 3))
                 result = concatenate(result, img, x, y)
+                del img
+
                 skipped += 1
                 print(' - (' + str(y + ytiles * x + 1) + '/' + str(total) + ') skipped')
             else:
                 img = downloadImage(getFilename(name, x, y), getUrl(name, xoff, yoff, tilewidth, zoom, quality))
                 result = concatenate(result, img, x, y)
+                del img
 
                 print(' - (' + str(y + ytiles * x + 1) + '/' + str(total) + ') complete')
 
     print('Download complete... (total: ' + str(total) + ', skipped: ' + str(skipped) + ', downloaded: ' + str(total - skipped) + ')')
     print('Save mosaic image... (' + str(os.path.getsize('result.mmap') / 1000000) + 'MB)');
-    misc.imsave('result.jpg', result);
+    misc.imsave(name + '.' + fileext, result);
+    del result
 
 def skipExisting(name, x, y):
     return (os.path.exists(getFilename(name,x,y) + 'mmap') & args.recycle);
@@ -110,4 +108,4 @@ def concatenate(result, img, x, y):
 
 
 ensureDir()
-downloadGrid(args.title, args.xoffset, args.yoffset, args.width, args.height, args.magnification, args.quality);
+downloadGrid(args.title, args.xoffset, args.yoffset, args.width, args.height, args.magnification, args.quality, args.format);
