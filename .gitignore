@@ -2,6 +2,10 @@
 tiles
 *.jpg
 *.png
+*.tiff
+*.bmp
+*.jpeg
+*.gif
 *.mmap
 *.npy
 
